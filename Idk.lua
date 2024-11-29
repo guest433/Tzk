@@ -48,92 +48,175 @@ end
 
 ------------------------------------------------------------------------------
 -- Corefuncs definitions
+local coreFuncs = {};
+local coreVars = {};
 
-coreFuncs.addInstance = function(instance, properties)
-	if instance and type(properties) == "table" then
-		local ins = Instance.new(tostring(instance));
-		for i,v in pairs(properties or {}) do
-			ins[i] = v;
-		end
-		return ins;
-	else
-		error("Invalid input for addInstance function.");
+-- Variables
+coreVars.usingSlider = false;
+
+-- Add instance function
+coreFuncs.addInstance = function(instanceType, properties)
+	if typeof(instanceType) ~= "string" or type(properties) ~= "table" then
+		error("Invalid input for addInstance function. Expected (string, table).", 2);
 	end
+	
+	local instance = Instance.new(instanceType);
+	for property, value in pairs(properties) do
+		instance[property] = value;
+	end
+	return instance;
 end
 
+-- Add rounded corners
 coreFuncs.roundify = function(element, radius)
+	local cornerRadius = radius and UDim.new(0, radius) or UDim.new(0, 4);
 	coreFuncs.addInstance("UICorner", {
-		CornerRadius =  radius and UDim.new(0, radius) or UDim.new(0,4),
+		CornerRadius = cornerRadius,
 		Parent = element
 	});
 end
 
-
-
--- Function for rotating instances. More info in main Ez Hub file
-coreFuncs.rotateInstanceBy = function(instance, rotationAngle, delay, isCounterClockwise)
-	for i = 1, rotationAngle / 40 do
-		local tween = game:GetService("TweenService"):Create(instance, TweenInfo.new(delay or 0.03, Enum.EasingStyle.Linear)coreFuncs.isUsingSlider = function()
-	return coreVars.usingSlider
+-- Check if a slider is being used
+coreFuncs.isUsingSlider = function()
+	return coreVars.usingSlider or false;
 end
 
+-- Dragging functionality
 coreFuncs.dragifyLib = function(mainFrame)
-	local dragging = false
-	local dragStart
-	local startPos
-	local dragConnection -- To manage InputChanged connection
+	local dragging = false;
+	local dragStart, startPos, dragInput;
 
 	local function update(input)
-		-- Update position in real-time while dragging
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			local delta = input.Position - dragStart
-			mainFrame.Position = UDim2.new(
-				startPos.X.Scale,
-				startPos.X.Offset + delta.X,
-				startPos.Y.Scale,
-				startPos.Y.Offset + delta.Y
-			)
-		end
+		if coreFuncs.isUsingSlider() or not dragging then return end
+		
+		local delta = input.Position - dragStart;
+		local newPos = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		);
+
+		game:GetService("TweenService"):Create(
+			mainFrame, TweenInfo.new(0.15, Enum.EasingStyle.Linear), {Position = newPos}
+		):Play();
 	end
 
 	mainFrame.InputBegan:Connect(function(input)
-		if coreFuncs.isUsingSlider() then return end
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			dragStart = input.Position
-			startPos = mainFrame.Position
+		if coreFuncs.isUsingSlider() or input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+		
+		dragging = true;
+		dragStart = input.Position;
+		startPos = mainFrame.Position;
 
-			-- Disconnect any previous drag connection to prevent memory leaks
-			if dragConnection then
-				dragConnection:Disconnect()
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false;
 			end
+		end)
+	end)
 
-			-- Connect InputChanged to update dragging position
-			dragConnection = game:GetService("UserInputService").InputChanged:Connect(function(input)
-				if dragging then
-					update(input)
-				end
-			end)
-
-			-- Handle drag end
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-					-- Optional: Smoothly snap the element to the final position using TweenService
-					game:GetService("TweenService"):Create(
-						mainFrame,
-						TweenInfo.new(0.1), -- Short snap duration
-						{ Position = mainFrame.Position }
-					):Play()
-				end
-			end)
+	mainFrame.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			dragInput = input;
 		end
 	end)
-			end, {Rotation = instance.Rotation + (isCounterClockwise and -40 or 40)});
+
+	game:GetService("UserInputService").InputChanged:Connect(function(input)
+		if input == dragInput then
+			update(input);
+		end
+	end)
+end
+
+-- Rotate an instance
+coreFuncs.rotateInstanceBy = function(instance, rotationAngle, delay, isCounterClockwise)
+	delay = delay or 0.03; -- Default delay
+	local step = 40 * (isCounterClockwise and -1 or 1); -- Determine direction
+
+	for _ = 1, math.abs(rotationAngle) / 40 do
+		local newRotation = instance.Rotation + step;
+		local tween = game:GetService("TweenService"):Create(
+			instance,
+			TweenInfo.new(delay, Enum.EasingStyle.Linear),
+			{Rotation = newRotation}
+		);
 		tween:Play();
 		tween.Completed:Wait();
 	end
 end
+
+-- Create a slider
+coreFuncs.createSlider = function(parent, name, initial, min, max, callback)
+	local sliderFrame = coreFuncs.addInstance("Frame", {
+		Name = name .. "Slider",
+		Parent = parent,
+		BackgroundColor3 = Color3.fromRGB(41, 53, 68),
+		Size = UDim2.new(0, 300, 0, 50)
+	});
+	
+	coreFuncs.roundify(sliderFrame, 8);
+
+	local sliderLabel = coreFuncs.addInstance("TextLabel", {
+		Parent = sliderFrame,
+		BackgroundTransparency = 1,
+		TextColor3 = Color3.fromRGB(255, 255, 255),
+		Font = Enum.Font.SourceSans,
+		TextSize = 14,
+		Text = name .. ": " .. tostring(initial),
+		Size = UDim2.new(1, 0, 0.5, 0)
+	});
+
+	local sliderBar = coreFuncs.addInstance("Frame", {
+		Parent = sliderFrame,
+		BackgroundColor3 = Color3.fromRGB(28, 41, 56),
+		Size = UDim2.new(0.9, 0, 0.2, 0),
+		Position = UDim2.new(0.05, 0, 0.6, 0)
+	});
+	
+	coreFuncs.roundify(sliderBar, 4);
+
+	local sliderKnob = coreFuncs.addInstance("Frame", {
+		Parent = sliderBar,
+		BackgroundColor3 = Color3.fromRGB(18, 98, 159),
+		Size = UDim2.new(0.1, 0, 1, 0)
+	});
+	
+	coreFuncs.roundify(sliderKnob, 8);
+
+	local function updateSlider(input)
+		local barSize = sliderBar.AbsoluteSize.X;
+		local barPos = sliderBar.AbsolutePosition.X;
+		local inputPos = input.Position.X;
+
+		local percentage = math.clamp((inputPos - barPos) / barSize, 0, 1);
+		local value = math.floor(min + (percentage * (max - min)));
+		sliderKnob.Position = UDim2.new(percentage, 0, 0, 0);
+		sliderLabel.Text = name .. ": " .. tostring(value);
+
+		if callback then callback(value) end
+	end
+
+	sliderKnob.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			coreVars.usingSlider = true;
+		end
+	end)
+
+	sliderKnob.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			coreVars.usingSlider = false;
+		end
+	end)
+
+	game:GetService("UserInputService").InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement and coreVars.usingSlider then
+			updateSlider(input);
+		end
+	end)
+end
+
+return coreFuncs;
 
 -- Handles the navigation tab opening and closing
 coreFuncs.handleNavLib = function(frame, nav, close, activeFrame)
